@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClipSplitter Demo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+    }
+    form {
+      margin-bottom: 20px;
+      padding: 10px;
+      border: 1px solid #ccc;
+    }
+    .hidden {
+      display: none;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+    }
+    input[type="text"],
+    input[type="password"] {
+      width: 100%;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+    input[type="file"] {
+      margin-top: 10px;
+    }
+    button {
+      margin-top: 10px;
+      padding: 8px 12px;
+    }
+    pre {
+      background: #f5f5f5;
+      padding: 10px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>ClipSplitter Demo</h1>
+  <p>This is a minimal demonstration interface for the ClipSplitter backend. Use the forms below to register, log in, and upload a video for scene detection.</p>
+
+  <form id="registerForm">
+    <h2>Register</h2>
+    <label>Username
+      <input type="text" id="regUsername" required />
+    </label>
+    <label>Password
+      <input type="password" id="regPassword" required />
+    </label>
+    <button type="submit">Register</button>
+    <div id="registerMessage"></div>
+  </form>
+
+  <form id="loginForm">
+    <h2>Login</h2>
+    <label>Username
+      <input type="text" id="logUsername" required />
+    </label>
+    <label>Password
+      <input type="password" id="logPassword" required />
+    </label>
+    <button type="submit">Login</button>
+    <div id="loginMessage"></div>
+  </form>
+
+  <form id="uploadForm" class="hidden">
+    <h2>Upload Video</h2>
+    <input type="file" id="videoFile" accept="video/*" required />
+    <button type="submit">Upload and detect scenes</button>
+    <div id="uploadMessage"></div>
+  </form>
+
+  <h2>Detected Scenes</h2>
+  <pre id="scenesOutput">No scenes detected yet.</pre>
+
+  <!-- Payment upgrade form (hidden until logged in) -->
+  <form id="paymentForm" class="hidden">
+    <h2>Upgrade to Pro</h2>
+    <p>Unlock advanced features and higher limits.</p>
+    <button id="payButton" type="button">Proceed to payment</button>
+    <div id="paymentMessage"></div>
+  </form>
+
+  <!-- YouTube upload form (hidden until a file is uploaded) -->
+  <form id="youtubeForm" class="hidden">
+    <h2>Schedule Upload to YouTube</h2>
+    <label>Title
+      <input type="text" id="ytTitle" required />
+    </label>
+    <label>Description
+      <input type="text" id="ytDescription" />
+    </label>
+    <label>Scheduled time (ISO 8601, optional)
+      <input type="text" id="ytTime" placeholder="2025-08-27T15:30:00Z" />
+    </label>
+    <label>YouTube OAuth token
+      <input type="text" id="ytToken" required />
+    </label>
+    <button type="submit">Schedule Upload</button>
+    <div id="youtubeMessage"></div>
+  </form>
+
+  <script>
+    const apiBase = window.location.origin;
+
+    let lastFileId = null;
+
+    document.getElementById('registerForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('regUsername').value;
+      const password = document.getElementById('regPassword').value;
+      const res = await fetch(`${apiBase}/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const msg = document.getElementById('registerMessage');
+      if (res.ok) {
+        msg.textContent = 'Registration successful.';
+      } else {
+        const data = await res.json();
+        msg.textContent = `Error: ${data.detail}`;
+      }
+    });
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const username = document.getElementById('logUsername').value;
+      const password = document.getElementById('logPassword').value;
+      const res = await fetch(`${apiBase}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const msg = document.getElementById('loginMessage');
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem('token', data.token);
+        msg.textContent = 'Login successful.';
+        document.getElementById('uploadForm').classList.remove('hidden');
+        document.getElementById('paymentForm').classList.remove('hidden');
+      } else {
+        const data = await res.json();
+        msg.textContent = `Error: ${data.detail}`;
+      }
+    });
+
+    document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fileInput = document.getElementById('videoFile');
+      const file = fileInput.files[0];
+      if (!file) {
+        return;
+      }
+      const token = localStorage.getItem('token');
+      // Read file as base64
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64data = reader.result.split(',')[1];
+        const payload = { filename: file.name, data: base64data };
+        const res = await fetch(`${apiBase}/upload?token=${encodeURIComponent(token)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const uploadMsg = document.getElementById('uploadMessage');
+        if (res.ok) {
+          const data = await res.json();
+          uploadMsg.textContent = 'Upload successful.';
+          lastFileId = data.file_id;
+          // Fetch scenes
+          const scenesRes = await fetch(`${apiBase}/scenes/${data.file_id}?token=${encodeURIComponent(token)}`);
+          if (scenesRes.ok) {
+            const scenes = await scenesRes.json();
+            document.getElementById('scenesOutput').textContent = JSON.stringify(scenes, null, 2);
+            // Show YouTube form so user can schedule upload
+            document.getElementById('youtubeForm').classList.remove('hidden');
+          } else {
+            document.getElementById('scenesOutput').textContent = 'Could not retrieve scenes.';
+          }
+        } else {
+          const err = await res.json();
+          uploadMsg.textContent = `Error: ${err.detail}`;
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Payment processing
+    document.getElementById('payButton').addEventListener('click', async () => {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        document.getElementById('paymentMessage').textContent = 'Please log in first.';
+        return;
+      }
+      const res = await fetch(`${apiBase}/create-checkout-session?token=${encodeURIComponent(token)}`, {
+        method: 'POST'
+      });
+      const msgDiv = document.getElementById('paymentMessage');
+      if (res.ok) {
+        const data = await res.json();
+        msgDiv.innerHTML = `Redirect to <a href="${data.checkout_url}" target="_blank">payment page</a> to complete payment.`;
+      } else {
+        const err = await res.json();
+        msgDiv.textContent = `Error: ${err.detail}`;
+      }
+    });
+
+    // YouTube upload form
+    document.getElementById('youtubeForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const token = localStorage.getItem('token');
+      if (!token) {
+        document.getElementById('youtubeMessage').textContent = 'Please log in first.';
+        return;
+      }
+      if (!lastFileId) {
+        document.getElementById('youtubeMessage').textContent = 'No file uploaded yet.';
+        return;
+      }
+      const title = document.getElementById('ytTitle').value;
+      const description = document.getElementById('ytDescription').value;
+      const scheduled_time = document.getElementById('ytTime').value;
+      const youtube_token = document.getElementById('ytToken').value;
+      const payload = { file_id: lastFileId, title, description, scheduled_time, youtube_token };
+      const res = await fetch(`${apiBase}/youtube/upload?token=${encodeURIComponent(token)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const msgDiv = document.getElementById('youtubeMessage');
+      if (res.ok) {
+        const data = await res.json();
+        msgDiv.textContent = data.message;
+      } else {
+        const err = await res.json();
+        msgDiv.textContent = `Error: ${err.detail}`;
+      }
+    });
+  </script>
+</body>
+</html>
